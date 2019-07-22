@@ -1,0 +1,131 @@
+Baseando-se nos dados disponibilizados:   
+
+a) qual o período (data/hora - inicial e final) dos logs?   
+
+Joguei o parquet dentro de um cluster que tenho para testes, diretório: /user/hive/warehouse/test.db/desafio
+
+CREATE EXTERNAL TABLE test.desafio2 LIKE PARQUET '/user/hive/warehouse/test.db/desafio/usuarios_astheki.gz.parquet'
+  STORED AS PARQUET
+  LOCATION '/user/hive/warehouse/test.db/desafio';
+
+
+select 
+Max(from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS")) data_inicial,
+MIN(from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS")) data_final
+from test.desafio2
+where concat(trim(u_lat),trim(u_lon)) is not null
+
+
+
+b) quantos usuários utilizaram a rede no período dos logs?   
+
+Total Usuários(que logaram nas redes)
+
+select count(1) total_usuário
+from test.desafio2
+where concat(trim(u_lat),trim(u_lon)) is not null
+
+Total de Usuários distintos (que logaram nas redes)
+
+select count(1) total_usuário_distintos from (
+select distinct u_id 
+from test.desafio2
+where concat(trim(u_lat),trim(u_lon)) is not null) a
+
+
+c) qual foi a quantidade de conexões por antena durante o período?   
+
+select count(1) total,concat(trim(u_lat),trim(u_lon)) rede
+from test.desafio2
+where concat(trim(u_lat),trim(u_lon)) is not null
+group by concat(trim(u_lat),trim(u_lon))
+
+
+
+d) quantas vezes o limite de conexões foi ultrapassado por antena?   
+
+Não teve conexões ultrapasando o limite
+
+select count(1) total,concat(trim(u_lat),trim(u_lon)) rede
+from test.desafio2
+where concat(trim(u_lat),trim(u_lon)) is not null
+group by concat(trim(u_lat),trim(u_lon))
+having count(1) > 500
+
+
+e) quantos usuários permaneceram conectados à mesma antena por todo tempo da conexão? 
+
+
+f) qual foi o pico de conexões a rede e em que horário ocorreu?   
+
+Total de conexões 190	
+Data do pico de conexões 2018-07-14 11:29:50.0000
+
+1º Criei uma tabela auxiliar para trazer o agredado de cada horário.
+
+create table test.pico_rede as 
+select count(1) total,from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS") as data_pico
+from test.desafio2
+where concat(trim(u_lat),trim(u_lon)) is not null
+group by from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS") 
+order by total desc
+
+2º Filtrei o maior pico e a horario que ocorreu
+
+select * from test.pico_rede a where a.total =(
+select max(total) total from test.pico_rede)
+
+
+g) no horário em que ocorreu o pico de conexões, mostre o número de conexões por antena. 
+
+
+Utilizei a tabela de auxiliar criada no passo anterior onde ja estava armanezada o total de conexão e o horário que ocorreu o pico, e fiz os joins e agrupamentos necessários para retornar o total por rede naquele determinado horário do pico.
+
+select count(1) total_conexao,resultado.data_pico,resultado.antena from (
+select pico.data_pico,concat(trim(rede.u_lat),trim(rede.u_lon)) as antena from test.pico_rede pico
+INNER JOIN test.desafio2 rede on pico.data_pico = from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS")
+where pico.total =190) resultado
+group by resultado.data_pico,resultado.antena
+
+
+
+
+
+h) qual foi o horário e o número de conexões em que as conexões foram mínimas?   
+
+
+Criei uma tabela auxiliar com os horários que tiveram a menor quantide de conexão
+
+create table test.naopico_conexao as 
+select count(1) total,from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS") as data_pico
+from test.desafio2
+where concat(trim(u_lat),trim(u_lon)) is not null
+group by from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS") 
+having count(1) <=1
+
+
+
+i) nesse horário com o mínimo de conexões, mostre o número de conexões por antena.  
+
+Nesse passo eu utilizei a tabela criada no passo anterior e fiz o join coma tabela principal para montar a consulta com as menores conexões e quais as redes.
+
+select naopico.total,naopico.data_pico,concat(trim(a.u_lat),trim(a.u_lon)) as antena from test.desafio2 a 
+INNER JOIN test.naopico_conexao naopico on from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS")=naopico.data_pico
+
+
+j) separe as últimas conexões de cada usuário àantena00egravenumarquivo(gzip e parquet). Esse arquivo deve conter o id dos usuários, timestamp (dd/MM/yyyy HH:mm) e distância (em metros) entre usuário e antena. 
+
+Obs: Não fiz a parte de distnacia em metros, pois não consegui entender a necessidade
+
+1º Criei uma tabela externa salvando em um arquivo .parquetfile o resultado da minha consulta
+
+CREATE EXTERNAL TABLE IF NOT EXISTS test.resultado
+STORED AS parquetfile
+LOCATION '/user/hive/warehouse/test.db/resultado_teste'
+AS
+  select u_id,max(from_unixtime(Cast(`timestamp` as bigint),"yyyy-MM-dd HH:mm:ss.SSSS")) as data_conexao from test.desafio2 group by u_id
+
+
+2º Rodei um get para baixar para minha máquina local
+
+hdfs dfs -get /user/hive/warehouse/test.db/resultado_teste/1946c74d0157c478-f406e3fe00000001_183209645_data.0.parq
